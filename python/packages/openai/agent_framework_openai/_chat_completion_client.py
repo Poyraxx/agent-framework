@@ -1227,7 +1227,12 @@ class RawOpenAIChatCompletionClient(
                     continue
                 case "text_reasoning" if (protected_data := content.protected_data) is not None:
                     # Buffer reasoning to attach to the next message with content/tool_calls
-                    pending_reasoning = json.loads(protected_data)
+                    try:
+                        pending_reasoning = json.loads(protected_data)
+                    except json.JSONDecodeError:
+                        # Other clients store opaque payloads here (Responses encrypted_content,
+                        # Anthropic thinking signatures) that are not reasoning_details JSON.
+                        logger.debug("Skipping reasoning protected_data that is not Chat Completions JSON.")
                 case "text_reasoning":
                     if content.text is None:
                         continue

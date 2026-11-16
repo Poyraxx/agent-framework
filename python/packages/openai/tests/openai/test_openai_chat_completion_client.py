@@ -1009,6 +1009,34 @@ def test_prepare_message_with_text_reasoning_content(
     assert prepared[0]["content"] == "The answer is 42."
 
 
+@pytest.mark.parametrize(
+    "protected_data",
+    [
+        pytest.param("gAAAAABo-opaque-ciphertext==", id="responses-encrypted-content"),
+        pytest.param("EqQBCkYIBxgCKkBsig==", id="anthropic-thinking-signature"),
+    ],
+)
+def test_prepare_message_skips_non_json_reasoning_protected_data(
+    openai_unit_test_env: dict[str, str],
+    protected_data: str,
+) -> None:
+    """Reasoning payloads written by other clients are not Chat Completions reasoning_details."""
+    client = OpenAIChatCompletionClient()
+    message = Message(
+        role="assistant",
+        contents=[
+            Content.from_text_reasoning(text="Adding numbers.", protected_data=protected_data),
+            Content.from_text(text="4"),
+        ],
+    )
+
+    prepared = client._prepare_message_for_openai(message)
+
+    assert len(prepared) == 1
+    assert prepared[0]["content"] == "4"
+    assert "reasoning_details" not in prepared[0]
+
+
 def test_prepare_message_with_unprotected_text_reasoning_content(
     openai_unit_test_env: dict[str, str],
 ) -> None:
