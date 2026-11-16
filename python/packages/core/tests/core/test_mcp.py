@@ -1,6 +1,7 @@
 # Copyright (c) Microsoft. All rights reserved.
 # pyright: ignore[reportPrivateUsage]
 import asyncio
+import base64
 import contextlib
 import inspect
 import json
@@ -3767,6 +3768,43 @@ def test_mcp_content_types_to_ai_content_embedded_resource_blob():
     assert ai_content.raw_representation == mcp_content
 
 
+def test_mcp_content_types_to_ai_content_embedded_resource_plain_base64_blob():
+    """A spec-compliant blob holds plain base64 and is converted to data content."""
+    blob_resource = types.BlobResourceContents(
+        uri="file:///a.pdf",
+        mime_type="application/pdf",
+        blob="JVBERi0xLjQ=",
+    )
+    mcp_content = types.EmbeddedResource(type="resource", resource=blob_resource)
+    ai_content = _HELPER_MCP_TOOL._parse_content_from_mcp(mcp_content)[0]
+
+    assert ai_content.type == "data"
+    assert ai_content.uri == "data:application/pdf;base64,JVBERi0xLjQ="
+    assert ai_content.media_type == "application/pdf"
+
+
+def test_mcp_content_types_to_ai_content_tool_result_with_plain_base64_blob():
+    """A sampling tool result that embeds a plain-base64 blob is parsed instead of raising."""
+    tool_result_content = types.ToolResultContent(
+        type="tool_result",
+        tool_use_id="t1",
+        content=[
+            types.EmbeddedResource(
+                type="resource",
+                resource=types.BlobResourceContents(
+                    uri="file:///a.pdf", mime_type="application/pdf", blob="JVBERi0xLjQ="
+                ),
+            )
+        ],
+    )
+
+    function_result = _HELPER_MCP_TOOL._parse_content_from_mcp(tool_result_content)[0]
+
+    assert function_result.type == "function_result"
+    assert function_result.items is not None
+    assert function_result.items[0].uri == "data:application/pdf;base64,JVBERi0xLjQ="
+
+
 def test_mcp_content_types_to_ai_content_tool_use_and_tool_result():
     """Test conversion of MCP tool use/result content to AI function call/result content."""
     tool_use_content = types.ToolUseContent(type="tool_use", id="call-1", name="calculator", input={"x": 1})
@@ -3807,7 +3845,7 @@ def test_ai_content_to_mcp_content_types_data_image():
 
     assert isinstance(mcp_content, types.ImageContent)
     assert mcp_content.type == "image"
-    assert mcp_content.data == "data:image/png;base64,xyz"
+    assert mcp_content.data == "xyz"
     assert mcp_content.mime_type == "image/png"
 
 
@@ -3818,7 +3856,7 @@ def test_ai_content_to_mcp_content_types_data_audio():
 
     assert isinstance(mcp_content, types.AudioContent)
     assert mcp_content.type == "audio"
-    assert mcp_content.data == "data:audio/mpeg;base64,xyz"
+    assert mcp_content.data == "xyz"
     assert mcp_content.mime_type == "audio/mpeg"
 
 
@@ -3832,8 +3870,17 @@ def test_ai_content_to_mcp_content_types_data_binary():
 
     assert isinstance(mcp_content, types.EmbeddedResource)
     assert mcp_content.type == "resource"
-    assert mcp_content.resource.blob == "data:application/octet-stream;base64,xyz"  # type: ignore[union-attr]  # ty: ignore[unresolved-attribute]
+    assert mcp_content.resource.blob == "xyz"  # type: ignore[union-attr]  # ty: ignore[unresolved-attribute]
     assert mcp_content.resource.mime_type == "application/octet-stream"
+
+
+def test_ai_content_to_mcp_content_types_from_data_is_plain_base64():
+    """Content built with from_data reaches MCP as decodable base64, as the spec requires."""
+    raw = b"fake png bytes"
+    mcp_content = _HELPER_MCP_TOOL._prepare_content_for_mcp(Content.from_data(data=raw, media_type="image/png"))
+
+    assert isinstance(mcp_content, types.ImageContent)
+    assert base64.b64decode(mcp_content.data, validate=True) == raw
 
 
 def test_ai_content_to_mcp_content_types_uri():

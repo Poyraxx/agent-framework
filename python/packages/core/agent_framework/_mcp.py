@@ -49,6 +49,7 @@ from ._types import (
     ChatOptions,
     Content,
     Message,
+    _get_data_bytes_as_str,  # pyright: ignore[reportPrivateUsage]
 )
 from .exceptions import ToolException, ToolExecutionException
 from .observability import (
@@ -1703,10 +1704,15 @@ class MCPTool:
                                 )
                             )
                         case types.BlobResourceContents():
+                            # MCP blobs are plain base64; older senders may still send a data URI.
+                            blob = mcp_type.resource.blob
+                            mime = mcp_type.resource.mime_type or "application/octet-stream"
+                            if not blob.startswith("data:"):
+                                blob = f"data:{mime};base64,{blob}"
                             return_types.append(
                                 Content.from_uri(
-                                    uri=mcp_type.resource.blob,
-                                    media_type=mcp_type.resource.mime_type,
+                                    uri=blob,
+                                    media_type=mime,
                                     raw_representation=mcp_type,
                                     additional_properties=(
                                         mcp_type.annotations.model_dump() if mcp_type.annotations else None
@@ -1736,15 +1742,19 @@ class MCPTool:
                 input=content.parse_arguments() or {},
             )
         if content.type == "data":
+            # MCP image, audio and blob fields carry plain base64, not a data URI.
+            data = _get_data_bytes_as_str(content)
+            if data is None:
+                return None
             if content.media_type and content.media_type.startswith("image/"):
-                return types.ImageContent(type="image", data=content.uri, mime_type=content.media_type)  # type: ignore[attr-defined]
+                return types.ImageContent(type="image", data=data, mime_type=content.media_type)
             if content.media_type and content.media_type.startswith("audio/"):
-                return types.AudioContent(type="audio", data=content.uri, mime_type=content.media_type)  # type: ignore[attr-defined]
+                return types.AudioContent(type="audio", data=data, mime_type=content.media_type)
             if content.media_type and content.media_type.startswith("application/"):
                 return types.EmbeddedResource(
                     type="resource",
                     resource=types.BlobResourceContents(
-                        blob=content.uri,  # type: ignore[attr-defined]
+                        blob=data,
                         mime_type=content.media_type,
                         uri=(
                             content.additional_properties.get("uri", "af://binary")
